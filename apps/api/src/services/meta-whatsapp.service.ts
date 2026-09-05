@@ -83,3 +83,15 @@ export async function sendMetaMessage(input: { accessToken: string; phoneNumberI
   if (!result.messages[0]?.id) throw new HttpError(502, "Meta accepted no WhatsApp message");
   return result.messages[0].id;
 }
+
+export async function downloadMetaMedia(input: { accessToken: string; mediaId: string }) {
+  const metadata = await graph<{ url?: string; mime_type?: string; file_size?: number }>(input.mediaId, input.accessToken);
+  if (!metadata.url) throw new HttpError(502, "Meta did not return an audio URL", "META_MEDIA_URL_MISSING");
+  const response = await fetch(metadata.url, { headers: { Authorization: `Bearer ${input.accessToken}` }, signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new HttpError(502, "Could not download the WhatsApp audio", "META_MEDIA_DOWNLOAD_FAILED");
+  const contentType = metadata.mime_type ?? response.headers.get("content-type") ?? "audio/ogg";
+  if (!contentType.toLowerCase().startsWith("audio/")) throw new HttpError(415, "WhatsApp media is not an audio file", "UNSUPPORTED_AUDIO_TYPE");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.byteLength > 16 * 1024 * 1024) throw new HttpError(413, "Audio messages must be 16 MB or smaller", "AUDIO_TOO_LARGE");
+  return { bytes, mimeType: contentType };
+}

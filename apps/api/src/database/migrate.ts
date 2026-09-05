@@ -394,6 +394,18 @@ CREATE TABLE IF NOT EXISTS whatsapp_messages (
   automation_run_id uuid, occurred_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(business_id,provider_message_id)
 );
 CREATE INDEX IF NOT EXISTS whatsapp_messages_conversation_idx ON whatsapp_messages(conversation_id,occurred_at);
+CREATE TABLE IF NOT EXISTS whatsapp_media_jobs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  connection_id uuid NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
+  conversation_id uuid NOT NULL REFERENCES whatsapp_conversations(id) ON DELETE CASCADE,
+  message_id uuid REFERENCES whatsapp_messages(id) ON DELETE CASCADE,
+  provider_media_id text NOT NULL, media_type text NOT NULL, mime_type text,
+  status text NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','completed','failed','dead_letter')),
+  attempts integer NOT NULL DEFAULT 0, available_at timestamptz NOT NULL DEFAULT now(),
+  transcript text, extraction jsonb, error text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(connection_id,provider_media_id)
+);
+CREATE INDEX IF NOT EXISTS whatsapp_media_jobs_ready_idx ON whatsapp_media_jobs(available_at) WHERE status IN ('queued','failed');
 CREATE TABLE IF NOT EXISTS whatsapp_templates (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   connection_id uuid NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE, provider_template_id text,

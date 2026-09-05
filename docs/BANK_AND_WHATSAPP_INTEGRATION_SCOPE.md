@@ -35,6 +35,20 @@ at write time. Another user or workspace cannot claim the number; the original o
 can use WhatsApp OTP to return to the existing account. Clearing a profile phone does
 not release its historical ownership claim.
 
+### WhatsApp audio messages
+
+Incoming `audio` messages are acknowledged immediately, stored as a
+`whatsapp_media_jobs` row, and processed by the integration worker. The worker
+retrieves protected media from Meta with the encrypted connection token, enforces
+the 16 MB limit, sends it to OpenAI transcription, and runs JSON-only extraction
+for order, payment, expense, inventory or invoice intent. The transcript is
+written back to the conversation. A review-only response includes the transcript,
+extracted summary and confidence; it does not create or confirm accounting,
+inventory or payment records. Jobs retry up to five times and then become
+`dead_letter`. Configure `OPENAI_API_KEY` and optionally
+`OPENAI_EXTRACTION_MODEL` (default `gpt-4o-mini`). If the key is missing, the job
+fails without exposing audio or creating a record; text messaging remains usable.
+
 Deployment requires both API and web updates. Startup migrations add identity and
 OTP tables and permit null user/business emails; existing email accounts remain
 unchanged. No new environment variables are required. Real PostgreSQL integration

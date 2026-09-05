@@ -19,6 +19,10 @@ export const env = {
   paystackCallbackUrl: process.env.PAYSTACK_CALLBACK_URL?.trim() ?? `${(process.env.CLIENT_URL ?? "http://localhost:5173").split(",")[0]!.trim()}/payments/paystack/callback`,
   publicWebUrl: process.env.PUBLIC_WEB_URL?.trim() ?? (process.env.CLIENT_URL ?? "http://localhost:5173").split(",")[0]!.trim(),
   publicApiUrl: process.env.PUBLIC_API_URL?.trim() ?? `http://localhost:${Number(process.env.PORT ?? 5000)}`,
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY?.trim() ?? "",
+    model: process.env.OPENAI_EXTRACTION_MODEL?.trim() ?? "gpt-4o-mini",
+  },
   whatsapp: {
     appId: process.env.META_APP_ID?.trim() ?? "",
     appSecret: process.env.WHATSAPP_APP_SECRET?.trim() ?? process.env.META_APP_SECRET?.trim() ?? "",

@@ -48,11 +48,16 @@ async function ingestMessage(connection: Record<string, any>, message: Record<st
     const contact = (await client.query<Record<string, any>>(`INSERT INTO whatsapp_contacts(business_id,connection_id,client_id,provider_contact_id,phone_e164,display_name,consent_state,consent_source,consented_at,last_inbound_at,service_window_expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,'customer_initiated',CASE WHEN $7='opted_in' THEN now() END,$8::timestamptz,$8::timestamptz+interval '24 hours') ON CONFLICT(connection_id,phone_e164) DO UPDATE SET client_id=COALESCE(whatsapp_contacts.client_id,EXCLUDED.client_id),display_name=COALESCE(EXCLUDED.display_name,whatsapp_contacts.display_name),consent_state=CASE WHEN whatsapp_contacts.consent_state='opted_out' THEN 'opted_out' ELSE EXCLUDED.consent_state END,last_inbound_at=$8::timestamptz,service_window_expires_at=$8::timestamptz+interval '24 hours',updated_at=now() RETURNING *`, [connection.business_id, connection.id, clientMatch?.id ?? null, message.from, phone, profile?.profile?.name ?? null, signals.optOut ? "opted_out" : "opted_in", occurredAt])).rows[0]!;
     if (signals.optOut) await client.query("UPDATE whatsapp_contacts SET opted_out_at=now() WHERE id=$1", [contact.id]);
     const conversation = (await client.query<Record<string, any>>(`INSERT INTO whatsapp_conversations(business_id,connection_id,contact_id,state,last_inbound_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(connection_id,contact_id) DO UPDATE SET state=EXCLUDED.state,last_inbound_at=$5,updated_at=now() RETURNING *`, [connection.business_id, connection.id, contact.id, signals.optOut ? "blocked" : "awaiting_business", occurredAt])).rows[0]!;
-    await client.query(`INSERT INTO whatsapp_messages(business_id,conversation_id,provider_message_id,direction,message_type,body,provider_status,occurred_at) VALUES($1,$2,$3,'inbound',$4,$5,'received',$6) ON CONFLICT(business_id,provider_message_id) DO NOTHING`, [connection.business_id, conversation.id, message.id, message.type ?? "text", body, occurredAt]);
+    const storedMessage = (await client.query<Record<string, any>>(`INSERT INTO whatsapp_messages(business_id,conversation_id,provider_message_id,direction,message_type,body,provider_status,occurred_at) VALUES($1,$2,$3,'inbound',$4,$5,'received',$6) ON CONFLICT(business_id,provider_message_id) DO UPDATE SET body=whatsapp_messages.body RETURNING id`, [connection.business_id, conversation.id, message.id, message.type ?? "text", body, occurredAt])).rows[0];
+    if (message.type === "audio" && message.audio?.id && storedMessage) {
+      await client.query(`INSERT INTO whatsapp_media_jobs(business_id,connection_id,conversation_id,message_id,provider_media_id,media_type,mime_type)
+        VALUES($1,$2,$3,$4,$5,'audio',$6) ON CONFLICT(connection_id,provider_media_id) DO NOTHING`, [connection.business_id, connection.id, conversation.id, storedMessage.id, String(message.audio.id), "audio/ogg"]);
+    }
     await client.query("UPDATE integration_connections SET last_success_at=now(),last_error_code=NULL,updated_at=now() WHERE id=$1", [connection.id]);
-    return { conversationId: conversation.id, contactId: contact.id, phone, consentState: contact.consent_state };
+    return { conversationId: conversation.id, contactId: contact.id, phone, consentState: contact.consent_state, audio: message.type === "audio" };
   });
   if (!ingested || !isPlatformConnection(connection)) return;
+  if (ingested.audio) return;
   if (ingested.consentState === "opted_out") {
     if (/^unlink$/i.test(body.trim())) await unlinkWhatsAppAccount(ingested.contactId);
     return;
