@@ -4,6 +4,7 @@ import { env } from "../config";
 import { query, transaction } from "../database/pool";
 import { HttpError } from "../http";
 import { decryptMetaCredentials, sendMetaMessage } from "./meta-whatsapp.service";
+import { claimAccountPhone } from "./account-phone.service";
 
 export type LinkResult = { status: "linked" | "unavailable"; message: string };
 const unavailable: LinkResult = { status: "unavailable", message: "Your account is ready, but this WhatsApp link has expired or is unavailable. Send CONNECT to LemonBooks on WhatsApp for a fresh link, then sign in." };
@@ -51,6 +52,9 @@ export async function completeWhatsAppLink(client: PoolClient, hash: string | nu
     WHERE m.user_id=$1 AND m.business_id=$2 AND (u.email_verified_at IS NOT NULL
       OR EXISTS(SELECT 1 FROM whatsapp_auth_identities a WHERE a.user_id=u.id))`, [userId, businessId]);
   if (!member) return unavailable;
+  const { rows: [contact] } = await client.query<{ phone_e164: string }>("SELECT phone_e164 FROM whatsapp_contacts WHERE id=$1", [ticket.contact_id]);
+  try { await claimAccountPhone(client, contact?.phone_e164, userId, businessId); }
+  catch (error) { if (error instanceof HttpError && error.code === "PHONE_ALREADY_IN_USE") return { status: "unavailable", message: error.message }; throw error; }
   const { rows: [existing] } = await client.query("SELECT business_id,user_id FROM whatsapp_account_links WHERE contact_id=$1", [ticket.contact_id]);
   if (existing && (existing.business_id !== businessId || existing.user_id !== userId)) {
     return { status: "unavailable", message: "This WhatsApp number is already linked to another account. Send UNLINK from that WhatsApp number before connecting a different account." };

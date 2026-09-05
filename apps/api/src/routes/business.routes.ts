@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { query } from "../database/pool";
+import { query, transaction } from "../database/pool";
 import { asyncRoute, HttpError } from "../http";
 import { publicBusiness } from "../services/auth.service";
 import { env } from "../config";
 import { paystack } from "./paystack.routes";
+import { claimAccountPhone } from "../services/account-phone.service";
 
 export const businessRouter = Router();
 
@@ -27,11 +28,14 @@ businessRouter.patch("/me", asyncRoute(async (req, res) => {
   if (email !== undefined && (typeof email !== "string" || (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim())))) throw new HttpError(400, "Enter a valid contact email");
   if (!name?.trim()) throw new HttpError(400, "Business name is required");
   if (currency && !/^[A-Z]{3}$/.test(currency)) throw new HttpError(400, "Currency must be a three-letter code");
-  const rows = await query<Record<string, unknown>>(
-    `UPDATE businesses SET name=$2,phone=$3,address=$4,country_code=$5,currency=$6,timezone=COALESCE($7,timezone),
-     logo_url=$8,email=CASE WHEN $9::boolean THEN $10::text ELSE email END,onboarding_completed=true,updated_at=now() WHERE id=$1 RETURNING *`,
-    [req.auth!.businessId, name.trim(), phone || null, address || null, countryCode || null, currency || null, timezone || null, logoUrl || null, email !== undefined, email?.trim().toLowerCase() || null],
-  );
+  const rows = await transaction(async client => {
+    await claimAccountPhone(client, phone, req.auth!.userId, req.auth!.businessId);
+    return (await client.query<Record<string, unknown>>(
+      `UPDATE businesses SET name=$2,phone=$3,address=$4,country_code=$5,currency=$6,timezone=COALESCE($7,timezone),
+       logo_url=$8,email=CASE WHEN $9::boolean THEN $10::text ELSE email END,onboarding_completed=true,updated_at=now() WHERE id=$1 RETURNING *`,
+      [req.auth!.businessId, name.trim(), phone || null, address || null, countryCode || null, currency || null, timezone || null, logoUrl || null, email !== undefined, email?.trim().toLowerCase() || null],
+    )).rows;
+  });
   res.json({ success: true, message: "Business settings saved", data: publicBusiness(rows[0]!) });
 }));
 

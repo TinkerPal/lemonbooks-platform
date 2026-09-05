@@ -152,14 +152,13 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     await assert.rejects(wa.verifyWhatsAppCode(waToken,"bad"));
     assert.equal((await query<{attempts:number}>("SELECT attempts FROM whatsapp_auth_challenges"))[0]!.attempts,1);
     const verified = await wa.verifyWhatsAppCode(waToken,waOtp);
-    assert.equal(verified.existing,false);
+    assert.equal(verified.existing,true, "a number already used by an email account cannot create another account");
     assert.equal((await query("SELECT id FROM users")).length,beforeUsers);
     await assert.rejects(wa.verifyWhatsAppCode(waToken,waOtp));
-    const signup = {whatsappLinkToken:waToken,proof:verified.proof,name:"Phone Owner",businessName:"Phone Shop",countryCode:"NG",currency:"NGN",timezone:"Africa/Lagos"};
+    const signup = {whatsappLinkToken:waToken,proof:verified.proof,businessId:verified.workspaces[0]!.id,name:"Phone Owner",businessName:"Phone Shop",countryCode:"NG",currency:"NGN",timezone:"Africa/Lagos"};
     const finished = await wa.finishWhatsAppAuth(signup);
-    assert.equal(finished.user.email,null);
-    assert.equal(finished.business.onboardingCompleted,true);
-    assert.equal((await query("SELECT id FROM users")).length,beforeUsers+1);
+    assert.equal(finished.user.id,binding.user_id);
+    assert.equal((await query("SELECT id FROM users")).length,beforeUsers);
     await assert.rejects(wa.finishWhatsAppAuth(signup));
     await query("UPDATE whatsapp_auth_challenges SET sent_at=now()-interval '2 minutes'");
     await inbound("LOGIN");
@@ -171,7 +170,7 @@ test("WhatsApp signup, authenticated linking, replay protection and confirmation
     await assert.rejects(wa.finishWhatsAppAuth({whatsappLinkToken:returnToken,proof:returning.proof,businessId:business.id}));
     const resumed = await wa.finishWhatsAppAuth({whatsappLinkToken:returnToken,proof:returning.proof,businessId:finished.business.id});
     assert.equal(resumed.user.id,finished.user.id);
-    assert.equal((await query("SELECT id FROM users")).length,beforeUsers+1);
+    assert.equal((await query("SELECT id FROM users")).length,beforeUsers);
     const expiredOtpToken = await newToken();
     await query("UPDATE whatsapp_auth_challenges SET sent_at=now()-interval '2 minutes'");
     await wa.requestWhatsAppCode(expiredOtpToken);

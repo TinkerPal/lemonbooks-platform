@@ -28,6 +28,13 @@ verified email-login identity. Paystack account activation requires a contact em
 and prompts for it separately. UNLINK removes conversation authorization, not the
 verified phone login identity or business records.
 
+Phone ownership is exclusive across both entry points. A normalized phone claim is
+reserved when a WhatsApp workspace is created or linked, and when an email-authenticated
+workspace saves its phone in Settings. Existing business phone values are also checked
+at write time. Another user or workspace cannot claim the number; the original owner
+can use WhatsApp OTP to return to the existing account. Clearing a profile phone does
+not release its historical ownership claim.
+
 Deployment requires both API and web updates. Startup migrations add identity and
 OTP tables and permit null user/business emails; existing email accounts remain
 unchanged. No new environment variables are required. Real PostgreSQL integration

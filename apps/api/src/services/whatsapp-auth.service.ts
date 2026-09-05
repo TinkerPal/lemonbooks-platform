@@ -7,6 +7,7 @@ import { createSessionToken } from "../middleware/auth";
 import { publicBusiness, slugify } from "./auth.service";
 import { completeWhatsAppLink, hashWhatsAppLink } from "./whatsapp-account-link.service";
 import { decryptMetaCredentials, sendMetaMessage } from "./meta-whatsapp.service";
+import { claimAccountPhone } from "./account-phone.service";
 
 async function ticket(client: PoolClient, token: unknown) {
   const { rows: [row] } = await client.query(`SELECT t.id,c.id AS contact_id,c.phone_e164,
@@ -62,6 +63,7 @@ export async function verifyWhatsAppCode(token: unknown, otp: unknown) {
     const proof = crypto.randomBytes(32).toString("hex");
     await client.query("UPDATE whatsapp_auth_challenges SET verified_at=now(),proof_hash=$2 WHERE ticket_id=$1", [t.id, hashWhatsAppLink(proof)]);
     const { rows: identities } = await client.query(`SELECT user_id FROM whatsapp_auth_identities WHERE phone=$1
+      UNION SELECT user_id FROM account_phone_claims WHERE phone=regexp_replace($1,'[^0-9]','','g')
       UNION SELECT user_id FROM whatsapp_account_links WHERE contact_id=$2`, [t.phone_e164, t.contact_id]);
     if (identities.length > 1) throw new HttpError(409, "This number has conflicting account links. Contact support to resolve them.");
     const identity = identities[0];
@@ -83,8 +85,8 @@ export async function finishWhatsAppAuth(input: Record<string, unknown>) {
       WHERE ticket_id=$1 AND proof_hash=$2 AND verified_at IS NOT NULL AND expires_at>now() FOR UPDATE`, [t.id, hashWhatsAppLink(input.proof)]);
     if (!a) throw new HttpError(401, "Verify your WhatsApp number again to continue.");
     const { rows: [identity] } = await client.query("SELECT user_id FROM whatsapp_auth_identities WHERE phone=$1", [t.phone_e164]);
-    let userId = identity?.user_id;
-    let businessId = input.businessId;
+    let userId: string | undefined = identity?.user_id as string | undefined;
+    let businessId: string | undefined = typeof input.businessId === "string" ? input.businessId : undefined;
     if (!userId) {
       const field = (key: string, max: number) => typeof input[key] === "string" ? (input[key] as string).trim().slice(0,max) : "";
       const name = field("name",120), businessName = field("businessName",160);
@@ -92,13 +94,15 @@ export async function finishWhatsAppAuth(input: Record<string, unknown>) {
       if (!name || !slugify(businessName) || !/^[A-Z]{2}$/.test(country) || !/^[A-Z]{3}$/.test(currency)) throw new HttpError(400, "Enter your name, business name, country and currency.");
       try { new Intl.DateTimeFormat("en", { timeZone: timezone }).format(); } catch { throw new HttpError(400, "Choose a valid timezone."); }
       const { rows: [user] } = await client.query("INSERT INTO users(name) VALUES($1) RETURNING id", [name]);
-      userId = user.id;
+      userId = String(user.id);
       const { rows: [business] } = await client.query(`INSERT INTO businesses(tenant_slug,name,phone,address,country_code,currency,timezone,onboarding_completed)
         VALUES($1,$2,$3,$4,$5,$6,$7,true) RETURNING id`, [slugify(businessName)+"-"+crypto.randomBytes(4).toString("hex"),businessName,t.phone_e164,field("address",500),country,currency,timezone]);
-      businessId = business.id;
+      businessId = String(business.id);
       await client.query(`INSERT INTO memberships(business_id,user_id,role,permissions) VALUES($1,$2,'owner','["all"]')`, [businessId,userId]);
+      await claimAccountPhone(client, t.phone_e164, userId, businessId);
       await client.query("INSERT INTO whatsapp_auth_identities(phone,user_id) VALUES($1,$2)", [t.phone_e164,userId]);
     }
+    if (!userId || !businessId) throw new HttpError(400, "Complete the account details to continue.");
     const { rows: [member] } = await client.query(`SELECT b.*,m.role,u.name AS user_name,u.email AS user_email
       FROM memberships m JOIN businesses b ON b.id=m.business_id JOIN users u ON u.id=m.user_id
       WHERE m.user_id=$1 AND b.id::text=$2`, [userId,typeof businessId === "string" ? businessId : ""]);

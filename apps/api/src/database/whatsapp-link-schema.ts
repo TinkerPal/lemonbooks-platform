@@ -4,6 +4,13 @@ ALTER TABLE businesses ALTER COLUMN email DROP NOT NULL;
 CREATE TABLE IF NOT EXISTS whatsapp_auth_identities (
  phone text PRIMARY KEY, user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS account_phone_claims (
+ phone text PRIMARY KEY,
+ user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS account_phone_claims_user_idx ON account_phone_claims(user_id);
 CREATE TABLE IF NOT EXISTS whatsapp_account_link_tickets (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   token_hash text NOT NULL UNIQUE,
